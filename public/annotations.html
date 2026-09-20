@@ -87,6 +87,22 @@
       </div>
       <div id="annList" class="ann-list"></div>
     </section>
+
+    <!-- 复盘播放清单（只存 IndexedDB）：从有效批注勾选区间，拖拽排序 -->
+    <section class="card" id="playlistCard">
+      <h2>④ 复盘播放清单（只存本浏览器 IndexedDB）</h2>
+      <div class="muted" style="margin-bottom:10px;line-height:1.7">
+        在上方批注列表中勾选「列入清单」把<b>有效批注</b>的圈定区间加入清单；在此<b>拖拽调整顺序</b>（自动保存到 IndexedDB）。
+        <a href="playlist.html">播放页</a>按清单顺序把各段拼接成一条虚拟时间轴连续回放：跨场次自动切换、1×/2×/4× 倍速，
+        重叠区间按清单顺序分别播放、绝不合并；失效或日志缺失的条目在播放前自动跳过并集中列明原因。
+      </div>
+      <div class="row" style="margin-bottom:10px">
+        <a href="playlist.html" class="narrow"><button type="button">▶ 打开播放页</button></a>
+        <button id="playlistClearBtn" class="secondary narrow">清空清单</button>
+        <span id="playlistSummary" class="muted" style="flex:1;text-align:right"></span>
+      </div>
+      <div id="playlistList" class="pl-list"></div>
+    </section>
   </main>
 
   <script src="replay.js"></script>
@@ -120,6 +136,9 @@
     const filterConflict = document.getElementById('filterConflict');
     const listCount = document.getElementById('listCount');
     const annList = document.getElementById('annList');
+    const playlistSummary = document.getElementById('playlistSummary');
+    const playlistList = document.getElementById('playlistList');
+    const playlistClearBtn = document.getElementById('playlistClearBtn');
 
     const params = new URLSearchParams(location.search);
     const prefill = {
@@ -137,6 +156,8 @@
     // 每条批注的当前重定位结果：id -> { valid, reason, startIndex, endIndex, startT, endT }
     let resolved = new Map();
     let records = [];
+    // 复盘播放清单：批注 id 的有序数组（只存 IndexedDB，见 CueAnnotations.getPlaylist/setPlaylist）
+    let playlist = [];
 
     // ---------------------------------------------------------------------
     // 展示工具
@@ -267,7 +288,25 @@
         btn.addEventListener('click', async () => {
           if (!confirm('确定从本浏览器删除这条批注？原文与锚点都会被移除。')) return;
           await A.remove(btn.dataset.del);
+          // 同步从播放清单移除（清单只存 IndexedDB）
+          if (playlist.includes(btn.dataset.del)) {
+            playlist = playlist.filter((id) => id !== btn.dataset.del);
+            await A.setPlaylist(playlist);
+          }
           await refresh();
+        });
+      });
+      // 勾选「列入清单」：加入清单末尾；取消勾选：从清单移除（只写 IndexedDB）
+      annList.querySelectorAll('[data-pl]').forEach((box) => {
+        box.addEventListener('change', async () => {
+          const id = box.dataset.pl;
+          if (box.checked) {
+            if (!playlist.includes(id)) playlist = [...playlist, id];
+          } else {
+            playlist = playlist.filter((x) => x !== id);
+          }
+          playlist = await A.setPlaylist(playlist);
+          renderPlaylist();
         });
       });
     }
@@ -290,11 +329,16 @@
       const head = res.valid
         ? `<a class="ann-jump" href="replay.html?file=${encodeURIComponent(r.sessionRef.fileId)}&run=${encodeURIComponent(r.sessionRef.runId)}&t=${encodeURIComponent(startT)}">↗ 跳回复盘区间起点 +${fmtT(startT)}</a>`
         : '<span class="ann-jump disabled">↚ 失效批注不可跳转</span>';
+      // 仅有效批注可勾选列入播放清单（失效条目即使曾在清单中，播放页也会自动跳过并列明原因）
+      const plCheck = res.valid
+        ? `<label class="ann-inline ann-pl-check" title="把该区间加入复盘播放清单"><input type="checkbox" data-pl="${esc(r.id)}"${playlist.includes(r.id) ? ' checked' : ''}> 列入清单</label>`
+        : '';
       return `<div class="ann-row ${res.valid ? '' : 'is-invalid'}">
         <div class="ann-row-head">
           ${badges.join(' ')}
           <span class="ann-session" title="${esc(refKey(r.sessionRef.fileId, r.sessionRef.runId))}">${esc(sessionLabel(r.sessionRef))}</span>
           ${head}
+          ${plCheck}
           <button class="mini danger ann-del" data-del="${esc(r.id)}">删除</button>
         </div>
         <div class="ann-range">区间：+${fmtT(startT)} → +${fmtT(endT)}</div>
@@ -313,6 +357,100 @@
       if (!ev) return '';
       return `<span class="ann-anchor-event" title="${esc(A.canonicalJson(ev))}">${label}：${fmtClock(ev.ts)} ${esc(Replay.eventLabel(ev.event))}</span>`;
     }
+
+    // ---------------------------------------------------------------------
+    // 复盘播放清单（只存 IndexedDB）：展示顺序、拖拽排序、移除；
+    // 清单只记录批注 id 的顺序，批注本体与重定位结果仍来自 annotations 存储。
+    // ---------------------------------------------------------------------
+    async function savePlaylist(order) {
+      playlist = await A.setPlaylist(order);
+      renderPlaylist();
+    }
+
+    function renderPlaylist() {
+      const byId = new Map(records.map((r) => [r.id, r]));
+      const items = playlist.map((id, i) => ({ id, rec: byId.get(id), res: resolved.get(id), pos: i }));
+      const playable = items.filter((x) => x.rec && x.res && x.res.valid);
+      const totalMs = playable.reduce((acc, x) => acc + Math.max(0, x.res.endT - x.res.startT), 0);
+      playlistSummary.textContent = playlist.length
+        ? `共 ${playlist.length} 段 ｜ 当前有效可播放 ${playable.length} 段 ｜ 累计区间时长 ${fmtT(totalMs)}`
+        : '清单为空';
+
+      if (!playlist.length) {
+        playlistList.innerHTML = '<div class="muted ann-empty">清单为空。在上方批注列表中勾选「列入清单」即可把有效批注的区间加入清单。</div>';
+        return;
+      }
+
+      playlistList.innerHTML = items.map((x) => {
+        if (!x.rec) {
+          // 批注已被删除（如其他页面操作）：保留占位，可手动移除
+          return `<div class="pl-row is-missing" draggable="true" data-id="${esc(x.id)}">
+            <span class="pl-handle" title="拖拽调整顺序">⠿</span>
+            <span class="pl-order">#${x.pos + 1}</span>
+            <span class="pl-body muted">批注记录不存在（可能已删除），播放时将自动跳过。id <code>${esc(x.id.slice(0, 13))}…</code></span>
+            <button class="mini danger pl-remove" data-rm="${esc(x.id)}">移除</button>
+          </div>`;
+        }
+        const valid = !!(x.res && x.res.valid);
+        const startT = valid ? x.res.startT : x.rec.startT;
+        const endT = valid ? x.res.endT : x.rec.endT;
+        const badge = valid
+          ? '<span class="ann-badge valid">✔ 有效</span>'
+          : '<span class="ann-badge invalid" title="播放时将自动跳过并列明原因">✖ 失效（播放时跳过）</span>';
+        const text = (x.rec.text || '').trim();
+        return `<div class="pl-row${valid ? '' : ' is-invalid'}" draggable="true" data-id="${esc(x.id)}">
+          <span class="pl-handle" title="拖拽调整顺序">⠿</span>
+          <span class="pl-order">#${x.pos + 1}</span>
+          <div class="pl-body">
+            <div class="pl-head">${badge}<span class="pl-session">${esc(sessionLabel(x.rec.sessionRef))}</span>
+              <span class="pl-range">+${fmtT(startT)} → +${fmtT(endT)}</span></div>
+            <div class="pl-text">${esc(text) || '<span class="muted">（无批注文本）</span>'}</div>
+          </div>
+          <button class="mini danger pl-remove" data-rm="${esc(x.id)}">移除</button>
+        </div>`;
+      }).join('');
+
+      playlistList.querySelectorAll('[data-rm]').forEach((btn) => {
+        btn.addEventListener('click', () => savePlaylist(playlist.filter((id) => id !== btn.dataset.rm)));
+      });
+
+      // 拖拽排序：HTML5 DnD，落点决定插入位置，保存到 IndexedDB
+      let dragId = null;
+      playlistList.querySelectorAll('.pl-row').forEach((row) => {
+        row.addEventListener('dragstart', (e) => {
+          dragId = row.dataset.id;
+          row.classList.add('dragging');
+          e.dataTransfer.effectAllowed = 'move';
+          e.dataTransfer.setData('text/plain', dragId);
+        });
+        row.addEventListener('dragend', () => {
+          dragId = null;
+          playlistList.querySelectorAll('.pl-row').forEach((r) => r.classList.remove('dragging', 'drag-over'));
+        });
+        row.addEventListener('dragover', (e) => {
+          if (!dragId || row.dataset.id === dragId) return;
+          e.preventDefault();
+          e.dataTransfer.dropEffect = 'move';
+          row.classList.add('drag-over');
+        });
+        row.addEventListener('dragleave', () => row.classList.remove('drag-over'));
+        row.addEventListener('drop', (e) => {
+          e.preventDefault();
+          const from = playlist.indexOf(dragId);
+          const to = playlist.indexOf(row.dataset.id);
+          if (from < 0 || to < 0 || from === to) return;
+          const next = playlist.slice();
+          next.splice(to, 0, ...next.splice(from, 1)); // 先取出被拖项，再插入目标位置
+          savePlaylist(next);
+        });
+      });
+    }
+
+    playlistClearBtn.addEventListener('click', async () => {
+      if (!playlist.length) return;
+      if (!confirm(`确定清空播放清单（${playlist.length} 段）？批注本体不受影响。`)) return;
+      await savePlaylist([]);
+    });
 
     function populateFilterTag() {
       const tags = new Set();
@@ -508,10 +646,12 @@
     // ---------------------------------------------------------------------
     async function refresh() {
       records = await A.getAll();
+      playlist = await A.getPlaylist();
       await relocalizeAll();
       populateFilterSession();
       populateFilterTag();
       renderList();
+      renderPlaylist();
     }
 
     async function init() {

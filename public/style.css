@@ -615,3 +615,102 @@ tr.current-row td { background: #24304a; }
 .ann-mini-jump { color: #8ab4ff; text-decoration: none; white-space: nowrap; }
 .ann-mini-jump:hover { text-decoration: underline; }
 .ann-mini-jump.disabled { color: #ff9c9c; cursor: not-allowed; }
+
+/* 复盘播放清单（/annotations.html 清单卡片 与 /playlist.html 播放页，只读 · IndexedDB 本地存储） */
+.pl-main { max-width: 1080px; }
+.ann-pl-check { font-size: 12px; color: #9aa3b8; white-space: nowrap; }
+.ann-pl-check input { width: auto; }
+
+.pl-list { display: grid; gap: 8px; }
+.pl-row {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  background: #14161c;
+  border: 1px solid #2c3040;
+  border-left: 3px solid #4caf7d;
+  border-radius: 8px;
+  padding: 8px 12px;
+}
+.pl-row.is-invalid { border-left-color: #ff7676; }
+.pl-row.is-missing { border-left-color: #7a5f2e; }
+.pl-row.dragging { opacity: 0.45; }
+.pl-row.drag-over { border-color: #2f6fed; box-shadow: 0 -2px 0 #2f6fed; }
+.pl-handle { cursor: grab; color: #5d6478; font-size: 15px; user-select: none; flex: 0 0 auto; }
+.pl-handle:active { cursor: grabbing; }
+.pl-order { flex: 0 0 auto; color: #8ab4ff; font-family: "SFMono-Regular", Consolas, monospace; font-size: 13px; }
+.pl-body { flex: 1; min-width: 0; font-size: 13px; line-height: 1.6; }
+.pl-head { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.pl-session { font-size: 12px; color: #9aa3b8; }
+.pl-range { font-family: "SFMono-Regular", Consolas, monospace; font-size: 12px; color: #9aa3b8; }
+.pl-text { margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pl-remove { flex: 0 0 auto; }
+
+/* 播放页：虚拟时间轴段条带（按清单顺序拼接，重叠区间各自成段） */
+.timeline .seg-band {
+  position: absolute;
+  top: 6px;
+  bottom: 22px;
+  border-left: 1px solid #3a4052;
+  border-right: 1px solid #3a4052;
+  background: rgba(47, 111, 237, 0.16);
+  font-size: 11px;
+  color: #8ab4ff;
+  padding: 3px 6px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+.timeline .seg-band.alt { background: rgba(76, 175, 125, 0.14); color: #8fe3a5; }
+.timeline .seg-band.active { outline: 2px solid #f0c169; outline-offset: -2px; }
+
+/* 播放页：当前段信息 */
+.pl-cur-head { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-bottom: 8px; }
+.pl-cur-badge {
+  display: inline-block;
+  padding: 3px 14px;
+  border-radius: 12px;
+  font-size: 13px;
+  background: #1e3350;
+  color: #9cc2ff;
+  border: 1px solid #2f5f9f;
+}
+
+/* 播放页：清单段列表 */
+.pl-seglist { display: grid; gap: 6px; }
+.pl-seg-row {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  flex-wrap: wrap;
+  background: #14161c;
+  border: 1px solid #2c3040;
+  border-radius: 8px;
+  padding: 8px 12px;
+  font-size: 13px;
+  cursor: pointer;
+}
+.pl-seg-row:hover { background: #20242f; }
+.pl-seg-row.active { border-color: #f0c169; }
+.pl-seg-session { color: #9aa3b8; font-size: 12px; }
+.pl-seg-range { font-family: "SFMono-Regular", Consolas, monospace; font-size: 12px; color: #9aa3b8; }
+.pl-seg-text { flex: 1; min-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* 播放页：跳过条目（集中列明原因） */
+.pl-skipped-card { border-color: #7a5f2e; }
+.pl-skipped-list { display: grid; gap: 6px; }
+.pl-skipped-row {
+  display: flex;
+  gap: 12px;
+  align-items: baseline;
+  flex-wrap: wrap;
+  background: #14161c;
+  border: 1px solid #4a3a1e;
+  border-radius: 8px;
+  padding: 8px 12px;
+  font-size: 13px;
+}
+.pl-skipped-pos { flex: 0 0 auto; color: #f0c169; font-size: 12px; white-space: nowrap; }
+.pl-skipped-text { flex: 1; min-width: 160px; color: #c3c9d8; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pl-skipped-reason { flex: 0 1 auto; color: #ff9c9c; font-size: 12px; }

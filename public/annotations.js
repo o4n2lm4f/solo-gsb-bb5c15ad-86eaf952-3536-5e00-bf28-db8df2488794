@@ -21,8 +21,10 @@ const CueAnnotations = (() => {
   const FORMAT = 'cue-annotations'; // 导出文件格式标识
   const VERSION = 1; // 导出文件格式版本
   const DB_NAME = 'cue-annotations';
-  const DB_VERSION = 1;
+  const DB_VERSION = 2; // v2：新增 playlist 对象存储（复盘播放清单，只存 IndexedDB）
   const STORE = 'annotations';
+  const PLAYLIST_STORE = 'playlist'; // 复盘播放清单：单条记录 { id: 'current', order: [批注id...] }
+  const PLAYLIST_KEY = 'current';
 
   // -------------------------------------------------------------------------
   // canonical JSON 与 SHA-256：与 public/archive.js（及服务端 archive.js）
@@ -401,6 +403,10 @@ const CueAnnotations = (() => {
         if (!db.objectStoreNames.contains(STORE)) {
           db.createObjectStore(STORE, { keyPath: 'id' });
         }
+        // v2 新增：复盘播放清单存储（与批注同库，仍只在本浏览器 IndexedDB）
+        if (!db.objectStoreNames.contains(PLAYLIST_STORE)) {
+          db.createObjectStore(PLAYLIST_STORE, { keyPath: 'id' });
+        }
       };
       req.onsuccess = () => resolve(req.result);
       req.onerror = () => reject(req.error || new Error('IndexedDB 打开失败'));
@@ -454,6 +460,43 @@ const CueAnnotations = (() => {
     });
   }
 
+  // -------------------------------------------------------------------------
+  // 复盘播放清单（只存 IndexedDB，无任何服务端写操作）：
+  // 清单为批注 id 的有序数组，整体存为单条记录；批注本体仍在 annotations 存储中，
+  // 播放页按 id 取回批注并重新定位，失效 / 日志缺失的条目自动跳过。
+  // -------------------------------------------------------------------------
+  async function getPlaylist() {
+    const db = await openDB();
+    return new Promise((resolve, reject) => {
+      const req = db.transaction(PLAYLIST_STORE, 'readonly').objectStore(PLAYLIST_STORE).get(PLAYLIST_KEY);
+      req.onsuccess = () => {
+        const rec = req.result;
+        resolve(rec && Array.isArray(rec.order) ? rec.order.filter((x) => typeof x === 'string') : []);
+      };
+      req.onerror = () => reject(req.error);
+    });
+  }
+
+  // 整体写入清单顺序（去重保序，只保留非空字符串 id）；返回清洗后的顺序数组
+  async function setPlaylist(order) {
+    const seen = new Set();
+    const clean = [];
+    for (const id of Array.isArray(order) ? order : []) {
+      if (typeof id === 'string' && id !== '' && !seen.has(id)) {
+        seen.add(id);
+        clean.push(id);
+      }
+    }
+    const db = await openDB();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(PLAYLIST_STORE, 'readwrite');
+      tx.objectStore(PLAYLIST_STORE).put({ id: PLAYLIST_KEY, order: clean, updatedAt: new Date().toISOString() });
+      tx.oncomplete = () => resolve(clean);
+      tx.onerror = () => reject(tx.error);
+      tx.onabort = () => reject(tx.error || new Error('写入被中止'));
+    });
+  }
+
   return {
     FORMAT,
     VERSION,
@@ -479,6 +522,9 @@ const CueAnnotations = (() => {
     putAll,
     remove,
     clearAll,
+    // 复盘播放清单（IndexedDB）
+    getPlaylist,
+    setPlaylist,
   };
 })();
 
